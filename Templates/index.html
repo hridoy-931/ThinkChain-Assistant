@@ -1,1 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Agent Problem Solver</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Multi-Agent Problem Solver</h1>
+        <form id="queryForm">
+            <label for="query">Enter your problem:</label>
+            <textarea id="query" name="query" required></textarea>
+            
+            <label for="model">Select Ollama Model:</label>
+            <select id="model" name="model">
+                <option value="mistral">Mistral (default)</option>
+                <option value="llama3">Llama3</option>
+                <!-- Add more options as needed -->
+            </select>
+            
+            <button type="submit">Submit</button>
+        </form>
+        
+        <div id="output">
+            <h2>Output:</h2>
+            <pre id="outputText"></pre>
+            <button id="speakButton" style="display: none;">Speak Output</button>
+        </div>
+    </div>
 
+    <script>
+        let fullOutput = ''; // Store output for TTS
+
+        document.getElementById('queryForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            document.getElementById('outputText').innerText = '';
+            document.getElementById('speakButton').style.display = 'none';
+            
+            fetch('/process', {
+                method: 'POST',
+                body: formData
+            }).then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok: ' + response.statusText);
+                }
+                return response.json();
+            }).then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                fullOutput = ''; // Reset full output
+                const eventSource = new EventSource('/stream');
+                eventSource.onmessage = function(event) {
+                    if (event.data === '') return;
+                    if (event.data.includes('Error:')) {
+                        alert('An error occurred: ' + event.data);
+                        eventSource.close();
+                        return;
+                    }
+                    document.getElementById('outputText').innerText += event.data;
+                    fullOutput += event.data;
+                    if (event.data.includes('=== Workflow Complete ===')) {
+                        eventSource.close();
+                        document.getElementById('speakButton').style.display = 'block';
+                    }
+                };
+                eventSource.onerror = function() {
+                    alert('Error streaming output from server');
+                    eventSource.close();
+                };
+            }).catch(error => {
+                alert('Error initiating process: ' + error.message);
+            });
+        });
+
+        document.getElementById('speakButton').addEventListener('click', function() {
+            fetch('/generate-audio')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch audio data: ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        alert(data.error);
+                        return;
+                    }
+                    const utterance = new SpeechSynthesisUtterance(data.text);
+                    utterance.lang = 'en-US';
+                    utterance.volume = 1;
+                    utterance.rate = 1;
+                    utterance.pitch = 1;
+                    window.speechSynthesis.speak(utterance);
+                })
+                .catch(error => {
+                    alert('Error generating audio: ' + error.message);
+                });
+        });
+    </script>
+</body>
+</html>
